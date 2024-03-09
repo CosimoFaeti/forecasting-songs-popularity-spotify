@@ -1,0 +1,406 @@
+---
+title: 'Compulsory Exercise 2: Spotify tracks dataset'
+author:
+- Cosimo Faeti
+- Johan Lagardèr
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: no
+    toc_depth: '2'
+    df_print: paged
+  pdf_document:
+    toc: no
+    toc_depth: '2'
+header-includes: \usepackage{amsmath}
+urlcolor: blue
+abstract: This is the place for your abstract (max 350 words)
+---
+  
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,message=FALSE,warning=FALSE,strip.white=TRUE,prompt=FALSE,
+                      cache=TRUE, size="scriptsize",fig.width=4, fig.height=3,fig.align = "center")
+
+```
+
+```{r,eval=TRUE,echo=FALSE}
+#install.packages("hrbrthemes")
+#install.packages("ggridges")
+#install.packages("ggthemes")
+#install.packages("cowplot")
+#install.packages("viridis")
+#install.packages("ggcorrplot")
+#install.packages("rpart.plot")
+library("knitr")
+library("rmarkdown")
+library("hrbrthemes")
+library("tidyverse")
+library("ggridges")
+library("ggthemes")
+library("cowplot")
+library("viridis")
+library("GGally")
+library("ggcorrplot")
+library("tree")
+library("randomForest")
+library("caret")
+library("rpart")
+library("rpart.plot")
+library("gbm")
+```
+
+<!--  Etc (load all packages needed). -->
+
+
+
+
+
+## Introduction: Scope and purpose of your project
+
+
+## Descriptive data analysis/statistics
+```{r}
+# Loading Dataset
+df <- read.csv(file = "dataset.csv")
+
+# Overview of the dataset
+str(df) 
+summary(df) 
+```
+The dimensions are 114000 observations (rows) of 21 variables (columns). The variables are composed by:
+* Qualitative variables: track_id, artists, album_name, track_name, explicit, key, mode, time_signature,  track_genre
+* Quantitative variables: popularity, duration_ms, danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo
+
+```{r}
+# Checking duplicates (no duplicates) and missing values (no missing values)
+anyDuplicated(df)
+any(is.na(df))
+```
+There are no duplicates or missing data in the dataset.
+
+The aim is to predict the popularity of songs by predicting the popularity score, which is a numerical value that ranges from 0 to 100. Thus, some qualitative variables such as track_id, artists, album_name, track_name and the fist unnamed column will be discarded from the data set. Moreover, track_genre and explicit will be converted into numerical variables. The former ranges from 1 to 114, while the latter from 1 (= False) to 2 (= True).
+```{r}
+Spotify = subset(df, select = -c(X, track_id, artists, album_name, track_name))
+str(Spotify)
+# Convert track_genre and explicit in numerical variable
+Spotify$track_genre <- as.numeric(factor(Spotify$track_genre)) 
+Spotify$explicit <- as.numeric(factor(Spotify$explicit))  
+str(Spotify)
+```
+
+Range of the variables are shown below:
+```{r}
+#quant = which(names(Spotify)%in%c("popularity", "duration_ms","explicit","danceability", "energy", "key", "loudness","mode", "speechiness", "acousticness", "instrumentalness", "liveness", "valence", "tempo", "time_signature", "track_genre"))
+sapply(Spotify[,], range) # sapply(Spotify[, quant], range)
+```
+
+Mean, median and standard deviation of the variables:
+```{r}
+# Mean, Median & Standard Deviation of quantitative predictors
+sapply(Spotify[,], mean) #sapply(Spotify[, quant], mean)
+sapply(Spotify[,], sd) #sapply(Spotify[, quant], sd) 
+sapply(Spotify[,], median) #sapply(Spotify[, quant], median)
+```
+
+Correlation and Heatmap are shown below:
+```{r}
+#ggpairs(df[, quant]) + theme_minimal()
+corr <- round(cor(Spotify[, ]), 2)
+corr
+#cov <- round(cov(Spotify[, ]), 2)
+#cov
+heatmap <- ggcorrplot(corr, hc.order =TRUE, type ="upper", lab =TRUE) +
+           theme(text = element_text(size = 10))
+heatmap
+```
+As we can observe from the heatmap, popularity has no significant correlation with any variables. In addition, there exists a strong positive relationship between energy-loudness, valence-danceability, while a strong negative relationship between energy-acousticness, loudness-acousticness and loudness-instrumentalness.
+A more precise visualization of the relationships among these variables is shown in the scatterplots below:
+```{r}
+# Scatterplot energy - loudness (Corr = 0.76)
+EnergyLoudness <- ggpairs(Spotify[, c(5, 7)])
+EnergyLoudness
+# Scatterplot valence - danceability (Corr = 0.48)
+ValenceDanceability <- ggpairs(Spotify[, c(13, 4)])
+ValenceDanceability
+# Scatterplot energy - acousticness (Corr = - 0.73)
+EnergyAcousticness <- ggpairs(Spotify[, c(5,10)])
+EnergyAcousticness
+# Scatterplot loudness - acousticness (Corr = - 0.59)
+LoudnessAcousticness <- ggpairs(Spotify[, c(7, 10)])
+LoudnessAcousticness
+# Scatterplot loudness - instrumentalness (Corr = - 0.43)
+LoudnessInstrumentalness <- ggpairs(Spotify[, c(7, 11)])
+LoudnessInstrumentalness
+```
+
+The density plot of popularity shows that the vast majority of songs have a low popularity score, i.e. a score below the 50 threshold. It is also evident that most of the tracks are defined as non-popular with a score of zero.
+```{r}
+PopPlot <- ggplot(Spotify, aes(x=popularity)) + 
+           geom_histogram(aes(y=..density..), binwidth = 5, fill="#69b3a2", color="#e9ecef")+
+           geom_density(alpha=.2, fill="#404080")
+PopPlot
+```
+
+The barplots show the distribution of qualitative variables. For instance, we can derive that the majority of the track are non-explicit or the most common number of beats in each bar of the track is 4.
+```{r}
+# Barplots of qualitative variables
+tema = theme(plot.background = element_rect(fill="#FFDAB9"),
+             plot.title = element_text(size=25, hjust=.5),
+             axis.title.x = element_text(size=22, color = "black"),
+             axis.text.x = element_text(size=20),
+             axis.text.y = element_text(size=20))
+keyPlot <- ggplot(data = Spotify, mapping = aes(x = key)) +
+    geom_bar(fill = "blue", color = "black", linewidth = 0.5, alpha = .8) +
+    theme_minimal() +
+    xlab("Key") +
+    ggtitle("Key Plot") +
+    tema
+modePlot <- ggplot(data = Spotify, mapping = aes(x = mode)) +
+    geom_bar(fill = "cyan", color = "black", linewidth = 0.5, alpha = .8) +
+    theme_minimal() +
+    xlab("Mode") +
+    ggtitle("Mode Plot") +
+    tema
+time_signaturePlot <- ggplot(data = Spotify, mapping = aes(x = time_signature)) +
+    geom_bar(fill = "green", color = "black", linewidth = 0.5, alpha = .8) +
+    theme_minimal() +
+    xlab("Time Signature") +
+    ggtitle("Time Signature Plot") +
+    tema
+explicitPlot <- ggplot(data = Spotify, mapping = aes(x = explicit)) +
+    geom_bar(fill = "skyblue", color = "black", linewidth = 0.5, alpha = .8) +
+    theme_minimal() +
+    xlab("Explicit") +
+    ggtitle("Explicit Plot") +
+    tema
+plot_grid(keyPlot, modePlot, time_signaturePlot, explicitPlot, nrow=2, ncol=2)
+```
+
+Boxplots of key, mode and explicit (against popularity) shows the same distribution and same median among the data, while different behaviors appears for different values of time_signature:
+```{r}
+# Boxplots of qualitative variables/Popularity
+boxplotPopKey <- ggplot(Spotify, aes(as.factor(key), popularity)) +
+      geom_boxplot(fill="blue", color = "black", linewidth=0.5, alpha=.8) +
+      theme_minimal() +
+      labs(title = "popularity vs key") +
+      tema
+boxplotPopMode <- ggplot(Spotify, aes(as.factor(mode), popularity)) +
+      geom_boxplot(fill="cyan", color = "black", linewidth=0.5, alpha=.8) +
+      theme_minimal() +
+      labs(title = "popularity vs mode") +
+      tema
+boxplotPopTimeSignature <- ggplot(Spotify, aes(as.factor(time_signature), popularity)) +
+      geom_boxplot(fill="green", color = "black", linewidth=0.5, alpha=.8) +
+      theme_minimal() +
+      labs(title = "popularity vs time_signature") +
+      tema
+boxplotPopExpl <- ggplot(Spotify, aes(as.factor(explicit), popularity)) +
+      geom_boxplot(fill="skyblue", color = "black", linewidth=0.5, alpha=.8) +
+      theme_minimal() +
+      labs(title = "popularity vs explicit") +
+      tema
+plot_grid(boxplotPopKey, boxplotPopMode, boxplotPopTimeSignature, boxplotPopExpl, nrow=2, ncol=2)
+
+```
+
+
+## Methods
+The aim is to predict the popularity of songs which is a numerical value ranges from 0 to 100, so the task is a regression problem. The main methods used to solve it are linear and tree-based models. In details, we will explore linear regression and some regularization approaches such as lasso, ridge and polynomial, while from the family of tree-based models we will see regression tree and ensemble methods such as bagging, random forest and boosting.
+
+Describe linear and regularization models.
+
+The main idea behind tree-based methods is to derive a set of decision rules for segmenting the predictor space into a number of finer and finer regions. All points in the same region will be given the same predictive value, in our regression case, as the mean of all values in that square. 
+
+Regression tree. In our case, we want to build a tree that predict the popularity of songs by setting splitting rules to segment the predictor space and summarized them in a tree. In general, we assume a dataset composed of $n$ pairs $(x_i, y_i)$, $i=1,...,n$, and each predictor is $x_i=(x_{i1},x_{i2},...,x_{ip})$, the goal is to predict $y_i$. The process of building a regression tree can be divided into two steps:
+* Divide the predictor space into $J$ distinct and non-overlapping regions, $R_1, R_2,...,R_J$
+* For every observation that falls into region $R_j$ we make the same prediction, which is the mean of the responses for the training observations that fall into $R_j$
+The aim is to divide the predictor space into non-overlapping regions $R_1, R_2,...,R_J$ such that minimize the residual sum of squares (RSS) on the training set, i.e., $RSS = \sum_{j=1}^J \sum_{i \in R_j} (y_i - \hat{y}_{R_j})^2 $.
+In our case, in order to reduce the variance (at the cost of an increased bias) given by a large tree, we pruned it back in order to obtain a subtree. In general, for this task is used a cost complexity pruning $C_{\alpha}(T)=Q(T)+ \alpha |T|$. A key component is the parameter $\alpha$ (in our case, using `rpart` package is represented by `cp`) which penalize the number of terminal nodes by ensuring that the tree does not get too many branches. To get the optimal $\alpha$ for the pruning step, we explored the complexity parameter with optimal (smallest) estimated prediction error.
+
+The main advantage of trees is the simplicity in which we can interpret the results. On the other hand, as our case will show, large trees are not easy to interpret. In addition, we have a poor prediction performance (high variance) and trees are not very robust to changes in the data.
+Given the above drawbacks, but also due to the nature of the problem, we ended up addressing them with ensemble methods (bagging, random forests and boosting).
+
+Bagging grows many trees from a bootstrapped data and average to get rid of the non-robustness and high variance. The idea is mainly based on bootstrapping which is the process of drawing with replacement $n$ observations from our sample. After bootstrapped the first sample, we repeat the process $B$ times and get $B$ bootstrap samples. For each bootstrap sample $b=1,...,B$ we construct a tree $\hat{f}^{*b}(x)$. In our regression problem, we take the average of all of the predictions and use this as the final result, i.e., $\hat{f}_{avg}(x) = \frac{1}{B} \sum_{b=1}^B Var \hat{f}^{*b}$.
+A drawback of bagging (but also for random forests) is that it becomes difficult to interpret the results. In fact, instead of having just one tree, the resulting model consists of many trees. To overcome this problem, we use the variable importance plot that show the relative importance of each predictors. The predictors are sorted according to their importance.
+
+Random forests inject randomness (and less variance) by allowing a random selection of predictors to be used for the splits at each node. As in bagging, we build a number of trees on bootstrapped training samples, but each time a split in a tree is considered, a random selection of $m$ predictors is chosen as split candidates from the full set of $p$ predictors. The split is allowed to use only one of those $m$ predictors. In regression, the optimal $m$ is given by $m = p/3$.
+
+Boosting make one tree, then another based on the residuals from the previous, and repeat it. The final predictor is a weighted sum of these trees. Different from the previous two ensemble methods, boosting requires hyperparameter tuning for number of trees ($B$), shrinkage parameter ($\lambda$) that control the rate at which boosting learns, and interaction depth ($d$), i.e., the number of splits in each tree. For this purpose we used 5-folds cross-validation.
+
+Describe cross-validation.
+
+Describe MSE.
+
+
+## Results and interpretation
+As a first step, we split the dataset 70% in training set and 30% in test set.
+```{r}
+# Splitting data into train (70%) and test (30%) set
+set.seed(1)
+n = nrow(Spotify)
+train = sample(1:n, 0.7*nrow(Spotify), replace = FALSE)
+test = (1:n)[-train]
+Spotify_train = Spotify[train,]
+Spotify_test = Spotify[test,]
+```
+
+Linear and regularization models
+```{r}
+
+```
+
+
+
+For regression tree, we first force the model to build a very large tree via the arguments of the function `rpart.control`. Note that by using a simple greedy approach, the tree would result in a single terminal node (more details are shown below).
+At the same time, to obtain a good picture of the evolution of the error, we set the smallest complexity parameter to be considered by the cross-validation experiment to a very low value (1e-8).
+```{r}
+## Regression tree
+set.seed(3445)
+mycontrol <- rpart.control(minsplit = 2, cp=1e-5, xval=10) 
+fit.regrtree <- rpart(popularity ~ ., data = Spotify_train, method="anova", control=mycontrol)
+
+printcp(fit.regrtree)
+
+# Plotting the tree
+#rpart.plot(fit.regrtree, main = "Regression Tree", compress=TRUE)
+
+# Predict on the test set
+pred.regrtree = predict(fit.regrtree, newdata = Spotify_test)
+mse.regrtree = mean((pred.regrtree - Spotify_test$popularity)^2)
+mse.regrtree #mse = 464.1089
+```
+As expected, using the previous approach lead us to a large tree and the MSE on test set is 464.1089 which is a better result than linear model. In order to lower the variance, with an higher cost of more bias, we prune the tree back to obtain a subtree:
+```{r}
+# Pruning step:
+# Plotting values of cp
+plotcp(fit.regrtree)
+
+# Find optimal cp 
+(b <- fit.regrtree$cptable[which.min(fit.regrtree$cptable[, "xerror"]), "CP"]) # optimal cp = 0.0001445644 = 0.001
+```
+By looking at the plot for the complexity parameter `cp` can be found out that the optimal value is about 0.001 - thesis confirmed by the code.
+```{r}
+set.seed(3446)
+fit.regrtreeprune <- prune(fit.regrtree, cp = b)
+
+# Plotting results
+plot(fit.regrtreeprune, uniform = FALSE, margin = 0.01)
+text(fit.regrtreeprune, pretty = FALSE)
+
+# Predict on test set
+pred.regrtreeprune = predict(fit.regrtreeprune, newdata = Spotify_test)
+mse.regrtreeprune = mean((pred.regrtreeprune - Spotify_test$popularity)^2)
+mse.regrtreeprune # mse = 376.672
+```
+As a result of pruning step, we get smaller tree with respect to the previous one but still composed by too many nodes. Important to notice that the MSE test is dropped to 376.672.
+
+For the sake of completeness, we report a regression tree developed using `tree()` package, instead of `rpart()`. In this specific case, we configured the tree using `tree.control` by setting default parameters: the minimum number of observations to include in either child node `mincut=1` and the smallest allowed node size `minsize=2`. As a result, we get a single terminal node and a MSE test of 498.0025.
+```{r}
+# First trial with tree() packages -> one terminal node
+set.seed(3447)
+fit.regrtreeOneNode = tree(popularity~., data=Spotify_train, control=tree.control(nobs=nrow(Spotify_train), mincut=1, minsize=2))
+summary(fit.regrtreeOneNode)
+#plot(fit.regrtreeOneNode)
+#text(fit.regrtreeOneNode, pretty=0)
+pred.regrtreeOneNode = predict(fit.regrtreeOneNode, newdata = Spotify_test)
+mse.regrtreeOneNode = mean((pred.regrtreeOneNode - Spotify_test$popularity)^2)
+mse.regrtreeOneNode # 498.0025
+```
+In the light of the results achieved, the regression tree is not able to capture variability in the data. A solution is using ensemble methods which can be an effective improvement in the accuracy of the regression models because they tend to reduce the risk of overfitting and can capture complex non-linear relationships between variables.
+
+Random forests is the first ensemble methods we look at. We set the number of variables samples as candidate at each split `mtry` equals to 5, i.e., $m = p/3 = 16/3 = 5$, and number of trees `ntree` equals to 500.
+```{r}
+## Random Forest (m=p/3=16/3=5) (almost 2 hours)
+set.seed(3449)
+fit.randforest = randomForest(popularity~., data= Spotify_train, mtry=(ncol(Spotify_train)-1)/3, ntree=500, importance=TRUE)
+pred.randforest = predict(fit.randforest, newdata = Spotify_test)
+mse.randforest = mean((pred.randforest - Spotify_test$popularity)^2)
+mse.randforest # 245.6213
+importance(fit.randforest) # track_genre, then duration_ms-danceability-acousticness-valence
+varImpPlot(fit.randforest)
+```
+As a result, we get a MSE test equals to 245.6213 which is a significant improvement with respect to the single regression tree. According to the variable importance plot, the variables that contribute most to predicting the popularity of songs are `track_genre`, `duration_ms`, `danceability`, `acousticness` and `valence`.
+
+The second ensemble method used is bagging. We set the `mtry` equals to the number of predictor variables, i.e., 15, since bagging uses all predictors to grow every tree, and number of trees `ntree` equals to 500.
+```{r}
+## Bagging (m=p=16) (3 hours)
+set.seed(3450)
+fit.bagging = randomForest(popularity~., data=Spotify_train, mtry = ncol(Spotify_train)-1, ntree = 500, importance = TRUE)
+pred.bagging = predict(fit.bagging, newdata = Spotify_test)
+mse.bagging = mean((pred.bagging - Spotify_test$popularity)^2)
+mse.bagging # 243.7598
+importance(fit.bagging) # duration_ms-acousticness
+varImpPlot(fit.bagging)
+```
+We get a slightly improvement in MSE test (i.e., 243.7598) with respect to random forests. Again, according to the variable importance plot, the variables that contribute most to predicting the popularity of songs are `duration_ms` and `acousticness`.
+
+The last ensemble method used is boosting. It requires an hyperparameter tuning for number of trees `n.trees`, interaction depth `interaction.depth` and shrinkage parameter `shrinkage`, that is performed by using 5-fold cross-validation.
+As a first step, we divided the dataset into training set (50%), validation set (20%) and test set (30%):
+
+```{r}
+## Boosting 
+set.seed(4)
+ntrain = nrow(Spotify_train)
+train2val = sample(1:ntrain, 0.14*nrow(Spotify_train), replace = FALSE)
+Spotify_val = Spotify_train[train2val,]
+Spotify_trainCV = Spotify_train[-train2val,]
+```
+Fit a basic boosting model on training set:
+```{r}
+basic <- gbm(popularity ~ ., data = Spotify_trainCV, distribution = "gaussian", n.trees = 100, interaction.depth = 4, shrinkage = 0.1)
+```
+Then, we start implementing the 5-folds cross validation. We create the grid of hyperparameters to search over:
+```{r}
+hyper_grid <- expand.grid(n.trees = seq(100, 500, by = 100), interaction.depth = seq(1, 5, by = 1), shrinkage = c(0.1, 0.01, 0.001),n.minobsinnode = 10)
+```
+Define the cross-validation method and the evaluation metric: 5-fold cross-validation to evaluate the performance of each set of hyperparameters and using RMSE (root mean squared error) as the evaluation metric.
+```{r}
+ctrl <- trainControl(method = "cv", number = 5, verboseIter = TRUE, returnResamp = "all", savePredictions = "all")
+metric <- "RMSE"
+```
+Train the model (on the validation set) which will perform the hyperparameter tuning using the `gbm` algorithm:
+```{r}
+set.seed(7)
+tune <- train(popularity ~ ., data = Spotify_val, method = "gbm", trControl = ctrl, metric = metric, tuneGrid = hyper_grid)
+```
+Extract the best hyperparameters and retrain the model on the new training set. The best hyperparameters are `n.trees = 500`, `interaction.depth = 5` and `shrinkage = 0.1`.
+```{r}
+best_n_trees <- tune$bestTune$n.trees #500
+best_n_trees
+best_interaction_depth <- tune$bestTune$interaction.depth # 5
+best_interaction_depth
+best_shrinkage <- tune$bestTune$shrinkage # 0.1
+best_shrinkage
+
+set.seed(9)
+fit.boosting <- gbm(popularity ~ ., data = Spotify_trainCV, distribution = "gaussian", n.trees = best_n_trees, interaction.depth = best_interaction_depth, shrinkage = best_shrinkage)
+```
+Evaluate the performance of the final model on the test set:
+```{r}
+pred.boosting = predict(fit.boosting, newdata = Spotify_test)
+mse.boosting = mean((pred.boosting - Spotify_test$popularity)^2)
+mse.boosting # 354.2969
+```
+Boosting has worst performance with respect to random forests and bagging. In fact, the MSE test is 354.2969.
+
+
+Barplots for MSE test of all the methods:
+```{r}
+Models <- c("RegrTree (not pruned)","RegrTree (pruned)", "RegrTree (one node)", "Random Forests","Bagging","Boosting")
+MSEtest_value <- c(250,100,500,350,450,400)
+#MSEtest_value <- c(mse.regrtree, mse.regrtreeprune, mse.regrtreeOneNode, mse.randforest, mse.bagging, mse.boosting)
+MSEtestdf = data.frame(Models, MSEtest_value)
+MSEtestPlot <- ggplot(MSEtestdf, aes(x=Models, y=MSEtest_value, fill= Models)) +
+      geom_bar(stat="identity", fill="steelblue", color = "black", linewidth=0.5, alpha=.8) +
+      geom_text(aes(label=MSEtest_value), vjust=1.6, color="white", size=3.5)+
+      theme(axis.text.x = element_text(angle=45, hjust=1), axis.text = element_text(size=1)) +
+      xlab("Models") +
+      ggtitle("MSE test all models")+
+      tema
+MSEtestPlot
+```
+
+
+## Summary
+As we can observe from the results of previous section, the best results are given by the tree/ensemble models. The reason why the tree/ensemble models gave us better results than linear models is to find in the nature of the problem itself. In fact, there is a highly non-linear and complex relationship between the features and the response, then models such as bagging, random forest, boosting outperform classical approaches like linear regression. In details, bagging and random forests outperform with respect to other models in predicting the popularity of songs - more precisely variables such as `duration_ms` and `acousticness` are relevant in this type of analysis.
