@@ -12,11 +12,8 @@ Error (MSE) score on the test set using Bagging and Random Forest techniques.
 In this repository, in the root level, you can find the pdf version of the report, the data and the code for the implementation of machine learning models for song popularity spotify data set. More specifically:
 
 **Compulsory Exercise 1**:
-* Compulsory1.R : contains compulsory exercises
+* Compulsory1.R : contains compulsory exercise 1
 
 **Compulsory Exercise 2**:
 * Compulsory2..Rmd : contains descriptive data analysis and the implementation of regularized linear models (multiple linear regression, and some regularization approaches such as lasso, ridge and polynomial), tree-based methods (regression tree), and ensemble methods (bagging, random forest and boosting)
-
-**Explainability**:
-* Module5_Explainability.ipynb : contains implementation of explainability techniques (SHAP, LIME)
 
